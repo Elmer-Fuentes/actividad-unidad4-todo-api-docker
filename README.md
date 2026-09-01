@@ -1,28 +1,3 @@
-# To-Do API — Actividad Unidad IV (Trivy, Sonar, Docker)
-
-API REST de tareas (To-Do) construida en **Node.js + Express**, organizada en capas
-(config / modelo / controlador / rutas), con **base de datos SQLite embebida**
-(`node:sqlite`, equivalente en espíritu al H2 en memoria usado en clase) y
-**documentación Swagger/OpenAPI**. Sigue el flujo DevSecOps de la Unidad IV:
-código → pruebas con cobertura → análisis con Sonar → imagen Docker → escaneo con
-Trivy → publicación en Docker Hub.
-
-## 1. Arquitectura del proyecto
-
-```
-src/
-  config/database.js      -> conexión SQLite y creación de la tabla
-  models/taskModel.js     -> acceso a datos (CRUD sobre la tabla tasks)
-  controllers/taskController.js -> lógica de request/response
-  routes/taskRoutes.js    -> rutas Express + anotaciones OpenAPI
-  docs/swagger.js         -> configuración de swagger-jsdoc
-  middleware/errorHandler.js
-  app.js                  -> ensambla la app Express (factory)
-  server.js               -> punto de entrada, levanta el servidor
-test/
-  taskModel.test.js       -> pruebas unitarias del modelo (capa de datos)
-  taskController.test.js  -> pruebas unitarias del controlador
-```
 
 Separar el modelo del controlador (y ambos de Express) permite probar la lógica
 de negocio sin levantar un servidor HTTP real — así se logró **100% de cobertura**
@@ -80,36 +55,22 @@ Resultado actual: 21 pruebas, **100% de cobertura de líneas** en `src/models` y
 
 ## 5. Análisis de calidad con SonarQube / SonarCloud
 
-Puedes usar SonarQube local (como en la demo de clase) o SonarCloud.
+Se usó **SonarCloud**, conectado directamente al repositorio de GitHub (análisis
+automático en cada push, sin necesidad de correr el scanner manualmente).
 
-**Opción A: SonarQube local con Docker (igual que en clase)**
-```bash
-docker run -d --name sonarqube -p 9000:9000 sonarqube:community
-# Espera a que levante, entra a http://localhost:9000 (admin/admin la primera vez)
-# Genera un token en Mi cuenta > Seguridad
-```
+El primer análisis detectó **4 hallazgos de seguridad (Medium)** en el `Dockerfile`,
+todos relacionados con el uso de `npm install`:
+- *"Using dependencies without locking resolved versions is security-sensitive"*
+- *"Omitting '--ignore-scripts' allows lifecycle scripts to run during package installation"*
 
-**Opción B: SonarCloud (gratis, sin instalar nada)**
-Crea cuenta en https://sonarcloud.io, conecta el repositorio y genera un token.
+Se corrigieron los 4 cambiando `npm install` por `npm ci --ignore-scripts` en las
+dos etapas del `Dockerfile` (usa exactamente las versiones fijadas en
+`package-lock.json` y bloquea la ejecución de scripts arbitrarios durante la
+instalación). Tras el fix se hizo `git push`, lo que disparó un nuevo análisis
+automático.
 
-**Ejecutar el análisis** (ya generado `coverage/lcov.info` con el paso anterior):
-```bash
-npm run test:coverage
-
-docker run --rm \
-  -e SONAR_TOKEN=TU_TOKEN \
-  -e SONAR_HOST_URL=http://localhost:9000 \
-  -v "$(pwd):/usr/src" \
-  sonarsource/sonar-scanner-cli
-```
-(Si usas SonarCloud, agrega `sonar.organization=TU_ORG` en `sonar-project.properties`
-y usa `SONAR_HOST_URL=https://sonarcloud.io`.)
-
-Revisa los hallazgos en el dashboard. Corrige al menos 2 (o documenta que no hubo
-hallazgos relevantes) y vuelve a escanear.
-
-Evidencia (captura o enlace del análisis):
-> _(pendiente: pegar captura o URL del proyecto en Sonar)_
+Evidencia (enlace del análisis):
+> https://sonarcloud.io/project/overview?id=Elmer-Fuentes_actividad-unidad4-todo-api-docker
 
 ## 6. Construir la imagen Docker
 
@@ -125,23 +86,35 @@ curl http://localhost:8080/health
 docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy image usuario/todo-api:1.0
 ```
 
-Documenta aquí el resultado (resumen de vulnerabilidades por severidad):
-> _(pendiente: pegar salida o captura de `trivy image usuario/todo-api:1.0`)_
+**Resultado antes de corregir:**
+- Alpine (SO): 20 vulnerabilidades (2 HIGH, 6 MEDIUM, 12 LOW) — `libssl3`/`libcrypto3`
+  desactualizados (OpenSSL).
+- Node.js (node-pkg): 18 vulnerabilidades (10 HIGH, 1 CRITICAL, 7 MEDIUM) — todas
+  en el CLI de `npm` empaquetado dentro de la imagen base (`tar`, `pacote`,
+  `sigstore`, `ip-address`, `picomatch`), no en las dependencias propias del
+  proyecto (Express, Swagger salieron con 0 vulnerabilidades).
 
-Si aparecen vulnerabilidades **HIGH** o **CRITICAL** fáciles de corregir (por
-ejemplo, actualizando `node:22-alpine` a un patch más reciente en el Dockerfile),
-corrígelas y vuelve a escanear antes de publicar.
+**Corrección aplicada:**
+1. `apk update && apk upgrade` en el Dockerfile para actualizar OpenSSL a la
+   versión con el fix.
+2. Eliminación del CLI de `npm` de la imagen final (`rm -rf /usr/local/lib/node_modules/npm ...`),
+   ya que en producción se arranca con `node src/server.js`, no con `npm start`,
+   así que no se necesita dentro del contenedor.
+
+**Resultado después de corregir:**
+- Alpine: **0 vulnerabilidades**.
+- Node.js (node-pkg): **0 vulnerabilidades**.
 
 ## 8. Publicar en Docker Hub
 
 ```bash
 docker login
-docker tag usuario/todo-api:1.0 usuario/todo-api:1.0
+docker build -t usuario/todo-api:1.0 .
 docker push usuario/todo-api:1.0
 ```
 
 URL pública de la imagen:
-> _(pendiente: pegar la URL de Docker Hub, ej. https://hub.docker.com/r/usuario/todo-api)_
+> https://hub.docker.com/r/elmerfuentes/todo-api
 
 ## 9. Registro de prompts utilizados con IA
 
@@ -150,9 +123,8 @@ URL pública de la imagen:
 | 1 | "Ayúdame a crear una API REST de tareas en Node.js/Express, organizada en capas (modelo/controlador/rutas), con una base de datos embebida." | Propuso separar modelo, controlador y rutas, y sugirió `node:sqlite` como base de datos embebida sin dependencias externas; se revisó cada capa y se ajustó la validación de `title`. |
 | 2 | "Agrega documentación Swagger/OpenAPI a los endpoints con swagger-jsdoc y swagger-ui-express." | Generó las anotaciones `@openapi` por endpoint y el montaje de `/api-docs`; se verificó que los schemas coincidieran con las respuestas reales del controlador. |
 | 3 | "¿Cómo genero un reporte de cobertura en formato lcov con el test runner nativo de Node para que Sonar lo pueda leer?" | Explicó las flags `--experimental-test-coverage --test-reporter=lcov`; se probó el comando y se confirmó 100% de cobertura en modelo y controlador antes de incluirlo. |
-| 4 | _(agregar el prompt real que usaste al interpretar los hallazgos de Sonar/Trivy)_ | _(completar tras ejecutar el análisis)_ |
-| 5 | _(agregar si usaste un quinto prompt)_ | _(completar)_ |
-
+| 4 | "Trivy me marca vulnerabilidades HIGH/CRITICAL en tar, pacote y sigstore, pero mi proyecto no usa esas librerías directamente, ¿por qué?" | Explicó que esos paquetes pertenecen al CLI de `npm` empaquetado dentro de la imagen base de Node, no a las dependencias del proyecto, y propuso eliminar el CLI de `npm` de la imagen final ya que no se usa en producción. |
+| 5 | "Sonar marca 'using dependencies without locking resolved versions' y 'omitting --ignore-scripts' en mi Dockerfile, ¿cómo lo corrijo?" | Explicó la diferencia entre `npm install` y `npm ci`, y recomendó agregar la bandera `--ignore-scripts` para evitar la ejecución de scripts arbitrarios durante la instalación de dependencias. |
 
 ## 10. Reflexión final
 
