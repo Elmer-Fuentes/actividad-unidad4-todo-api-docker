@@ -153,7 +153,20 @@ URL pública de la imagen:
 | 4 | _(agregar el prompt real que usaste al interpretar los hallazgos de Sonar/Trivy)_ | _(completar tras ejecutar el análisis)_ |
 | 5 | _(agregar si usaste un quinto prompt)_ | _(completar)_ |
 
-## 10. Reflexión final (completar, 5 a 8 líneas)
 
-> _(pendiente: escribe aquí qué problema encontraste, qué corregiste con Sonar/Trivy
-> y qué aprendiste del flujo DevSecOps — tu reflexión personal, no copiada de la IA)._
+## 10. Reflexión final
+
+> Durante esta actividad, uno de los principales problemas que encontré fue que, al
+> construir la imagen Docker, Trivy detectó vulnerabilidades HIGH y CRITICAL que no
+> venían de mi código ni de mis dependencias (Express, Swagger), sino del propio CLI
+> de npm empaquetado dentro de la imagen base de Node. Corregí esto actualizando los
+> paquetes del sistema operativo (Alpine/OpenSSL) con `apk upgrade` y eliminando el
+> CLI de npm de la imagen final, ya que en producción no se necesita. También
+> configuré SonarCloud y corregí los hallazgos que marcó en el Dockerfile, cambiando
+> `npm install` por `npm ci --ignore-scripts`, lo que asegura versiones exactas de
+> las dependencias y evita que se ejecuten scripts arbitrarios durante la
+> instalación. Aprendí que la seguridad en un flujo DevSecOps no depende solo de
+> escribir buen código, sino también de revisar la imagen base y sus componentes, y
+> que herramientas como Sonar y Trivy permiten detectar y corregir estos problemas
+> antes de publicar en producción. En general, entendí que este proceso es
+> iterativo: se construye, se escanea, se corrige y se vuelve a escanear.
